@@ -1,0 +1,11 @@
+# #  Ansible version 2.13.13
+- hosts: my-nodes
+  gather_facts: no
+  become_method: su
+  become_user: root
+  become: yes
+  vars_files: 
+  - ../global_vars/commons.yaml
+  - ../global_vars/secrets.yaml
+  roles:
+    - { role: roles/update_password }

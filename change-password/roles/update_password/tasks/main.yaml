@@ -1,0 +1,70 @@
+- name: set_fact_globally
+  set_fact:
+    ansible_ssh_user: "{{ users.default }}"
+    ansible_ssh_pass: "{{ passwords.old_admin_password }}"
+    ansible_become_pass: "{{ passwords.old_root_password }}"
+
+- name: Cleanup old logs trial
+  ansible.builtin.file:
+    path: ./ansible_ping.log
+    state: absent
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Check su access
+  ansible.builtin.command: whoami
+  register: su_result
+  ignore_errors: true
+  ignore_unreachable: true
+  failed_when: false
+
+- name: Ping the VM
+  ansible.builtin.ping:
+  register: ping_result
+  ignore_unreachable: true
+  ignore_errors: true
+  failed_when: false
+
+- name: Connection success
+  ansible.builtin.shell: |
+    echo "{{ inventory_hostname }} - {{ hostvars[inventory_hostname]['ansible_host'] }} - CONNECTED" >> ./ansible_ping.log
+  when: ping_result.unreachable is not defined and (su_result.rc | default(1)) == 0
+  delegate_to: localhost
+  become: no
+
+- name: Connection failure
+  ansible.builtin.shell: |
+    if echo "{{ su_result.msg }}" | grep -q "Incorrect su password"; then
+        echo "{{ inventory_hostname }} - {{ hostvars[inventory_hostname]['ansible_host'] }} - INCORRECT ROOT PASSWORD" >> ./ansible_ping.log
+    fi
+  when: (su_result.rc | default(1)) !=0
+  delegate_to: localhost
+  become: no
+
+- name: Connection failure 2
+  ansible.builtin.shell: |
+    if echo "{{ ping_result.msg }}" | grep -q "Invalid/incorrect password"; then
+        echo "{{ inventory_hostname }} - {{ hostvars[inventory_hostname]['ansible_host'] }} - INVALID ADMIN PASSWORD" >> ./ansible_ping.log
+    elif echo "{{ ping_result.msg }}" | grep -q "No route to host"; then
+        echo "{{ inventory_hostname }} - {{ hostvars[inventory_hostname]['ansible_host'] }} - NO ROUTE TO HOST" >> ./ansible_ping.log
+    else
+        echo "{{ inventory_hostname }} - {{ hostvars[inventory_hostname]['ansible_host'] }} - UNREACHABLE (OTHER ERROR)" >> ./ansible_ping.log
+    fi
+  when: ping_result.unreachable is defined
+  delegate_to: localhost
+  become: no
+
+- name: Change user {{ users.default }} password
+  ansible.builtin.user:
+    name: "{{ users.default }}"
+    password: "{{ passwords.new_admin_password | password_hash('sha512') }}"
+  no_log: true
+  when: ping_result.unreachable is not defined and (su_result.rc | default(1)) == 0
+
+- name: Change root password
+  ansible.builtin.user:
+    name: "{{ users.privileged }}"
+    password: "{{ passwords.new_root_password | password_hash('sha512') }}"
+  no_log: true
+  when: ping_result.unreachable is not defined and (su_result.rc | default(1)) == 0

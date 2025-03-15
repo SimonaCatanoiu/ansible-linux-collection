@@ -1,0 +1,4 @@
+---
+users:
+  default: admin
+  privileged: root
